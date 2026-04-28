@@ -26,6 +26,7 @@ const IMAGE_OUTPUT_FORMAT = 'png';
 const MAX_SEARCHES_PER_ANCHOR = 2;
 const PAUSE_BETWEEN_ANCHORS_MS = 20000; // 20s pauzy żeby nie wyczerpać rate limit
 const RESEARCH_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 const client = new Anthropic();
 
 // =============================================
@@ -241,7 +242,7 @@ Na końcu JSON w \`\`\`json:
 Polski. Konkrety, nie abstrakty. Zwięźle.`;
 }
 
-async function researchAnchor(anchor, lead, sessionId) {
+async function researchAnchor(anchor, lead, sessionId, retryCount = 0) {
   const startMs = now();
   const response = await client.messages.create({
     model: MODEL_RESEARCH,
@@ -254,10 +255,20 @@ async function researchAnchor(anchor, lead, sessionId) {
   const searches = response.content.filter(b => b.type === 'server_tool_use').length;
   const tokensIn = response.usage?.input_tokens || 0;
   const tokensOut = response.usage?.output_tokens || 0;
-  const parsed = safeParseJson(text, `research-${anchor}`);
 
-  logTiming(sessionId, `research-${anchor}`, startMs, `(${searches} searches, in:${tokensIn}, out:${tokensOut})`);
-  return parsed;
+  try {
+    const parsed = safeParseJson(text, `research-${anchor}`);
+    logTiming(sessionId, `research-${anchor}`, startMs, `(${searches} searches, in:${tokensIn}, out:${tokensOut})`);
+    return parsed;
+  } catch (err) {
+    if (retryCount < 2) {
+      console.log(`[${sessionId}] ⚠️  research-${anchor} parse failed (próba ${retryCount + 1}/3), retry...`);
+      // Pauza 5s przed retry
+      await new Promise(r => setTimeout(r, 5000));
+      return researchAnchor(anchor, lead, sessionId, retryCount + 1);
+    }
+    throw err;
+  }
 }
 
 // =============================================
@@ -320,7 +331,7 @@ JSON w \`\`\`json:
 \`\`\``;
 }
 
-async function generateBrief(config, research, guidelines, sessionId) {
+async function generateBrief(config, research, guidelines, sessionId, retryCount = 0) {
   const startMs = now();
   const response = await client.messages.create({
     model: MODEL_BRIEFS,
@@ -331,12 +342,22 @@ async function generateBrief(config, research, guidelines, sessionId) {
   const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
   const tokensIn = response.usage?.input_tokens || 0;
   const tokensOut = response.usage?.output_tokens || 0;
-  const parsed = safeParseJson(text, `brief-${config.id}`);
-  if (parsed.image_prompt_en && parsed.image_prompt_en.length > 1200) {
-    parsed.image_prompt_en = parsed.image_prompt_en.slice(0, 1197) + '...';
+
+  try {
+    const parsed = safeParseJson(text, `brief-${config.id}`);
+    if (parsed.image_prompt_en && parsed.image_prompt_en.length > 1200) {
+      parsed.image_prompt_en = parsed.image_prompt_en.slice(0, 1197) + '...';
+    }
+    logTiming(sessionId, `brief-${config.id}`, startMs, `(in:${tokensIn}, out:${tokensOut})`);
+    return parsed;
+  } catch (err) {
+    if (retryCount < 2) {
+      console.log(`[${sessionId}] ⚠️  brief-${config.id} parse failed (próba ${retryCount + 1}/3), retry...`);
+      await new Promise(r => setTimeout(r, 3000));
+      return generateBrief(config, research, guidelines, sessionId, retryCount + 1);
+    }
+    throw err;
   }
-  logTiming(sessionId, `brief-${config.id}`, startMs, `(in:${tokensIn}, out:${tokensOut})`);
-  return parsed;
 }
 
 // =============================================
@@ -382,53 +403,62 @@ Wygeneruj zaktualizowany JSON w \`\`\`json.`;
 // =============================================
 // IMAGE GEN — Nano Banana 2
 // =============================================
-async function generateImage(brief, imageFilename, sessionId) {
+async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
   const startMs = now();
   const FAL_KEY = process.env.FAL_KEY;
   if (!FAL_KEY) throw new Error('Brak FAL_KEY');
+  if (!brief?.image_prompt_en) throw new Error('Brief bez image_prompt_en');
 
-  const res = await fetch(FAL_ENDPOINT, {
-    method: 'POST',
-    headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt: brief.image_prompt_en,
-      num_images: 1,
-      aspect_ratio: IMAGE_ASPECT_RATIO,
-      output_format: IMAGE_OUTPUT_FORMAT
-    })
-  });
+  try {
+    const res = await fetch(FAL_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        prompt: brief.image_prompt_en,
+        num_images: 1,
+        aspect_ratio: IMAGE_ASPECT_RATIO,
+        output_format: IMAGE_OUTPUT_FORMAT
+      })
+    });
 
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`fal submit ${res.status}: ${errText}`);
-  }
-  const { request_id } = await res.json();
-
-  const statusUrl = `${FAL_ENDPOINT}/requests/${request_id}/status`;
-  const resultUrl = `${FAL_ENDPOINT}/requests/${request_id}`;
-
-  // Nano Banana 2 jest bardzo szybki - polling co 500ms
-  for (let i = 0; i < 120; i++) {
-    await new Promise(r => setTimeout(r, 500));
-    const s = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
-    const sj = await s.json();
-    if (sj.status === 'COMPLETED') {
-      const r = await fetch(resultUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
-      const rj = await r.json();
-      const url = rj.images?.[0]?.url;
-      if (!url) throw new Error('brak URL');
-
-      const imgRes = await fetch(url);
-      const buf = Buffer.from(await imgRes.arrayBuffer());
-      const filepath = path.join(IMAGES_DIR, imageFilename);
-      await fs.writeFile(filepath, buf);
-
-      logTiming(sessionId, `image-${brief.id}`, startMs);
-      return `/images/${imageFilename}`;
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`fal submit ${res.status}: ${errText}`);
     }
-    if (sj.status === 'FAILED') throw new Error(`fal failed: ${JSON.stringify(sj)}`);
+    const { request_id } = await res.json();
+
+    const statusUrl = `${FAL_ENDPOINT}/requests/${request_id}/status`;
+    const resultUrl = `${FAL_ENDPOINT}/requests/${request_id}`;
+
+    for (let i = 0; i < 120; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const s = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+      const sj = await s.json();
+      if (sj.status === 'COMPLETED') {
+        const r = await fetch(resultUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+        const rj = await r.json();
+        const url = rj.images?.[0]?.url;
+        if (!url) throw new Error('brak URL');
+
+        const imgRes = await fetch(url);
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        const filepath = path.join(IMAGES_DIR, imageFilename);
+        await fs.writeFile(filepath, buf);
+
+        logTiming(sessionId, `image-${brief.id}`, startMs);
+        return `/images/${imageFilename}`;
+      }
+      if (sj.status === 'FAILED') throw new Error(`fal failed: ${JSON.stringify(sj)}`);
+    }
+    throw new Error('fal timeout');
+  } catch (err) {
+    if (retryCount < 2) {
+      console.log(`[${sessionId}] ⚠️  image-${brief.id} failed (próba ${retryCount + 1}/3): ${err.message}, retry...`);
+      await new Promise(r => setTimeout(r, 5000));
+      return generateImage(brief, imageFilename, sessionId, retryCount + 1);
+    }
+    throw err;
   }
-  throw new Error('fal timeout');
 }
 
 // =============================================
@@ -629,7 +659,10 @@ const activeSessions = new Map();
 function checkBasicAuth(req, res) {
   const expectedUser = process.env.BASIC_AUTH_USER;
   const expectedPass = process.env.BASIC_AUTH_PASS;
+
+  // Jeśli zmienne nie są ustawione - auth wyłączony (np. lokalny dev)
   if (!expectedUser || !expectedPass) return true;
+
   const authHeader = req.headers.authorization || '';
   const match = authHeader.match(/^Basic (.+)$/);
   if (!match) {
@@ -640,10 +673,12 @@ function checkBasicAuth(req, res) {
     res.end('Wymagane logowanie');
     return false;
   }
+
   const decoded = Buffer.from(match[1], 'base64').toString('utf8');
   const idx = decoded.indexOf(':');
   const user = decoded.slice(0, idx);
   const pass = decoded.slice(idx + 1);
+
   if (user !== expectedUser || pass !== expectedPass) {
     res.writeHead(401, {
       'WWW-Authenticate': 'Basic realm="Blocki Lead Flow"',
@@ -652,11 +687,14 @@ function checkBasicAuth(req, res) {
     res.end('Niepoprawne dane logowania');
     return false;
   }
+
   return true;
 }
 
 async function handleRequest(req, res) {
-if (!checkBasicAuth(req, res)) return;
+  // Basic Auth check - blokuje wszystkie requesty bez prawidłowego loginu
+  if (!checkBasicAuth(req, res)) return;
+
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   try {
@@ -758,8 +796,27 @@ if (!checkBasicAuth(req, res)) return;
 
     if (req.method === 'POST' && url.pathname === '/api/regen') {
       const body = await readBody(req);
-      const { leadId, briefId, oldBrief, comment } = JSON.parse(body);
+      const { leadId, briefId, oldBrief: clientOldBrief, comment } = JSON.parse(body);
       const guidelines = await loadGuidelines();
+
+      // Jeśli klient nie wysłał oldBrief (np. po reload), pobierz z dysku
+      let oldBrief = clientOldBrief;
+      if (!oldBrief || !oldBrief.image_prompt_en) {
+        try {
+          const briefsPath = path.join(LEADS_DIR, leadId, 'briefs.json');
+          const raw = await fs.readFile(briefsPath, 'utf8');
+          const allBriefs = JSON.parse(raw);
+          oldBrief = allBriefs.find(b => b.id === briefId);
+          if (!oldBrief) {
+            throw new Error(`Brief ${briefId} nie znaleziony w ${briefsPath}`);
+          }
+          console.log(`[regen] Wczytany brief z dysku: ${briefId}`);
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Brief niedostępny: ${e.message}` }));
+          return;
+        }
+      }
 
       const regenStart = now();
       const newBrief = await rewriteBriefWithFeedback(oldBrief, comment, guidelines);

@@ -29,7 +29,7 @@ const RESEARCH_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const ANT_KEY = process.env.ANTHROPIC_API_KEY || '';
 const FAL_KEY_DEBUG = process.env.FAL_KEY || '';
 console.log('[DIAG] ANTHROPIC_API_KEY length:', ANT_KEY.length, 'starts with:', ANT_KEY.slice(0, 10), 'ends with:', ANT_KEY.slice(-4));
-console.log('[DIAG] FAL_KEY length:', FAL_KEY_DEBUG.length, 'starts with:', FAL_KEY_DEBUG.slice(0, 6));x
+console.log('[DIAG] FAL_KEY length:', FAL_KEY_DEBUG.length, 'starts with:', FAL_KEY_DEBUG.slice(0, 6));
 const client = new Anthropic();
 
 // =============================================

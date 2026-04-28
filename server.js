@@ -26,10 +26,6 @@ const IMAGE_OUTPUT_FORMAT = 'png';
 const MAX_SEARCHES_PER_ANCHOR = 2;
 const PAUSE_BETWEEN_ANCHORS_MS = 20000; // 20s pauzy żeby nie wyczerpać rate limit
 const RESEARCH_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-const ANT_KEY = process.env.ANTHROPIC_API_KEY || '';
-const FAL_KEY_DEBUG = process.env.FAL_KEY || '';
-console.log('[DIAG] ANTHROPIC_API_KEY length:', ANT_KEY.length, 'starts with:', ANT_KEY.slice(0, 10), 'ends with:', ANT_KEY.slice(-4));
-console.log('[DIAG] FAL_KEY length:', FAL_KEY_DEBUG.length, 'starts with:', FAL_KEY_DEBUG.slice(0, 6));
 const client = new Anthropic();
 
 // =============================================
@@ -630,7 +626,37 @@ const activeSessions = new Map();
 // =============================================
 // HTTP SERVER
 // =============================================
+function checkBasicAuth(req, res) {
+  const expectedUser = process.env.BASIC_AUTH_USER;
+  const expectedPass = process.env.BASIC_AUTH_PASS;
+  if (!expectedUser || !expectedPass) return true;
+  const authHeader = req.headers.authorization || '';
+  const match = authHeader.match(/^Basic (.+)$/);
+  if (!match) {
+    res.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="Blocki Lead Flow"',
+      'Content-Type': 'text/plain; charset=utf-8'
+    });
+    res.end('Wymagane logowanie');
+    return false;
+  }
+  const decoded = Buffer.from(match[1], 'base64').toString('utf8');
+  const idx = decoded.indexOf(':');
+  const user = decoded.slice(0, idx);
+  const pass = decoded.slice(idx + 1);
+  if (user !== expectedUser || pass !== expectedPass) {
+    res.writeHead(401, {
+      'WWW-Authenticate': 'Basic realm="Blocki Lead Flow"',
+      'Content-Type': 'text/plain; charset=utf-8'
+    });
+    res.end('Niepoprawne dane logowania');
+    return false;
+  }
+  return true;
+}
+
 async function handleRequest(req, res) {
+if (!checkBasicAuth(req, res)) return;
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   try {

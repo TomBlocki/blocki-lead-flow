@@ -1,15 +1,19 @@
 {
   "name": "blocki-lead-flow",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Blocki Custom — automatyczna generacja wizualizacji leadów B2B",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
+  "author": "Tomasz Wiech",
   "license": "ISC",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.0",
     "dotenv": "^17.4.2"

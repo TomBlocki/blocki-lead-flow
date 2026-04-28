@@ -1,0 +1,21 @@
+# Sekrety - NIGDY nie commitować
+.env
+.env.local
+.env.*.local
+
+# Zależności Node
+node_modules/
+npm-debug.log*
+
+# Dane lokalne (na serwerze będzie persistent volume)
+data/
+output/
+
+# Narzędzia developerskie
+.claude/
+.DS_Store
+
+# Edytory
+.vscode/
+.idea/
+*.swp

@@ -310,11 +310,16 @@ Zasady dla image_prompt_en:
 - Pisz naturalnym angielskim, pełnymi zdaniami
 - Zacznij od: "A detailed scale model built entirely from interlocking plastic construction bricks like LEGO"
 - Opisz konkretnie CO jest w kadrze (obiekty, figurki, rekwizyty, tło)
-- Podkreśl "every flat surface has visible round studs on top" i "minifigures have cubic heads with simple painted faces"
-- Wspomnij materiał: "matte ABS plastic, no gloss"
+- Wspomnij że płaskie powierzchnie klocków mają widoczne studs (wypustki)
 - Oświetlenie: "professional product photography lighting on a neutral gray background"
 - Kolory: użyj konkretnych hex z palety
-- Długość: 400-800 znaków (model lepiej rozumie detale)
+- Długość: 400-800 znaków
+
+KRYTYCZNE — anatomia figurek:
+NIE pisz "cubic heads", "blocky figures", "standard LEGO minifigures" ani niczego co sugeruje klasyczne LEGO city. Figurki w scenkach MUSZĄ być w stylu Blocki (zaokrąglone kształty).
+
+OSTATNIE ZDANIE image_prompt_en MUSI brzmieć DOKŁADNIE:
+"All figures in the scene are Blocki-style minifigures, NOT standard LEGO: rounded smooth body shapes, flowing curved arms without elbow segments, rounded shoe-shaped feet with visible toe (not square blocks), distinct rounded hip joint between torso and legs, softly rounded heads (not cubic)."
 
 JSON w \`\`\`json:
 
@@ -326,7 +331,7 @@ JSON w \`\`\`json:
   "title_pl": "tytuł max 5 słów",
   "concept_pl": "2-3 zdania po polsku",
   "key_elements": ["element1", "element2"],
-  "image_prompt_en": "Natural English description 400-800 chars. Start: 'A detailed scale model built entirely from interlocking plastic construction bricks like LEGO...'. Include what's in frame, emphasize visible studs and cubic minifigures, describe lighting and colors."
+  "image_prompt_en": "Natural English description 400-800 chars. Start: 'A detailed scale model built entirely from interlocking plastic construction bricks like LEGO...'. End with the EXACT mandatory Blocki anatomy sentence above."
 }
 \`\`\``;
 }
@@ -345,9 +350,33 @@ async function generateBrief(config, research, guidelines, sessionId, retryCount
 
   try {
     const parsed = safeParseJson(text, `brief-${config.id}`);
-    if (parsed.image_prompt_en && parsed.image_prompt_en.length > 1200) {
-      parsed.image_prompt_en = parsed.image_prompt_en.slice(0, 1197) + '...';
+
+    // GUARD RAIL: wymuszamy frazę Blocki anatomy na końcu image_prompt_en
+    // Niezależnie czy Claude ją dodał czy nie - kod dokleja jeśli brak
+    const BLOCKI_ANATOMY = "All figures in the scene are Blocki-style minifigures, NOT standard LEGO: rounded smooth body shapes, flowing curved arms without elbow segments, rounded shoe-shaped feet with visible toe (not square blocks), distinct rounded hip joint between torso and legs, softly rounded heads (not cubic).";
+
+    if (parsed.image_prompt_en) {
+      // Usuwamy frazy które przyklepują LEGO (jeśli Claude je dał)
+      parsed.image_prompt_en = parsed.image_prompt_en
+        .replace(/\bcubic heads?\b/gi, 'rounded heads')
+        .replace(/\bcubic minifigures?\b/gi, 'Blocki-style minifigures')
+        .replace(/\bblocky minifigures?\b/gi, 'Blocki-style minifigures')
+        .replace(/\bstandard LEGO minifigures?\b/gi, 'Blocki-style minifigures');
+
+      // Sprawdź czy fraza już jest na końcu, jeśli nie - dodaj
+      if (!parsed.image_prompt_en.includes('Blocki-style minifigures, NOT standard LEGO')) {
+        // Trim i dodaj frazę
+        parsed.image_prompt_en = parsed.image_prompt_en.trim();
+        if (!parsed.image_prompt_en.endsWith('.')) parsed.image_prompt_en += '.';
+        parsed.image_prompt_en += ' ' + BLOCKI_ANATOMY;
+      }
+
+      // Limit długości
+      if (parsed.image_prompt_en.length > 1500) {
+        parsed.image_prompt_en = parsed.image_prompt_en.slice(0, 1497) + '...';
+      }
     }
+
     logTiming(sessionId, `brief-${config.id}`, startMs, `(in:${tokensIn}, out:${tokensOut})`);
     return parsed;
   } catch (err) {
@@ -394,9 +423,28 @@ Wygeneruj zaktualizowany JSON w \`\`\`json.`;
 
   const text = response.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
   const parsed = safeParseJson(text, 'brief-rewrite');
-  if (parsed.image_prompt_en && parsed.image_prompt_en.length > 1200) {
-    parsed.image_prompt_en = parsed.image_prompt_en.slice(0, 1197) + '...';
+
+  // GUARD RAIL: ta sama logika co w generateBrief
+  const BLOCKI_ANATOMY = "All figures in the scene are Blocki-style minifigures, NOT standard LEGO: rounded smooth body shapes, flowing curved arms without elbow segments, rounded shoe-shaped feet with visible toe (not square blocks), distinct rounded hip joint between torso and legs, softly rounded heads (not cubic).";
+
+  if (parsed.image_prompt_en) {
+    parsed.image_prompt_en = parsed.image_prompt_en
+      .replace(/\bcubic heads?\b/gi, 'rounded heads')
+      .replace(/\bcubic minifigures?\b/gi, 'Blocki-style minifigures')
+      .replace(/\bblocky minifigures?\b/gi, 'Blocki-style minifigures')
+      .replace(/\bstandard LEGO minifigures?\b/gi, 'Blocki-style minifigures');
+
+    if (!parsed.image_prompt_en.includes('Blocki-style minifigures, NOT standard LEGO')) {
+      parsed.image_prompt_en = parsed.image_prompt_en.trim();
+      if (!parsed.image_prompt_en.endsWith('.')) parsed.image_prompt_en += '.';
+      parsed.image_prompt_en += ' ' + BLOCKI_ANATOMY;
+    }
+
+    if (parsed.image_prompt_en.length > 1500) {
+      parsed.image_prompt_en = parsed.image_prompt_en.slice(0, 1497) + '...';
+    }
   }
+
   return parsed;
 }
 

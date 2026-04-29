@@ -20,8 +20,19 @@ const MODEL_REGEN = 'claude-sonnet-4-5-20250929';
 
 // NANO BANANA 2 - reasoning-guided, fast (1-3s), Gemini 3.1 Flash Image
 const FAL_ENDPOINT = 'https://queue.fal.run/fal-ai/nano-banana-2';
+const FAL_EDIT_ENDPOINT = 'https://queue.fal.run/fal-ai/nano-banana-2/edit';
 const IMAGE_ASPECT_RATIO = '1:1';
 const IMAGE_OUTPUT_FORMAT = 'png';
+
+// Referencyjne figurki Blocki - serwowane z GitHub raw
+// Używane jako wzorzec stylu dla generowania scenek (image-to-image)
+const REFERENCE_FIGURE_URLS = [
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/figurka1.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/figurka2.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/figurka3.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/figurka4.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/figurka5.png'
+];
 
 const MAX_SEARCHES_PER_ANCHOR = 2;
 const PAUSE_BETWEEN_ANCHORS_MS = 20000; // 20s pauzy żeby nie wyczerpać rate limit
@@ -470,16 +481,44 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
   if (!FAL_KEY) throw new Error('Brak FAL_KEY');
   if (!brief?.image_prompt_en) throw new Error('Brief bez image_prompt_en');
 
+  const isTotem = brief.format === 'totem';
+
+  // Totem -> standard text-to-image (bez figurek, bez referencji)
+  // Scenka -> edit endpoint z referencjami stylu figurek Blocki
+  const endpoint = isTotem ? FAL_ENDPOINT : FAL_EDIT_ENDPOINT;
+
+  // Dla scenek - wzbogacamy prompt o instrukcję jak używać referencji
+  let finalPrompt = brief.image_prompt_en;
+  let requestBody;
+
+  if (isTotem) {
+    requestBody = {
+      prompt: finalPrompt,
+      num_images: 1,
+      aspect_ratio: IMAGE_ASPECT_RATIO,
+      output_format: IMAGE_OUTPUT_FORMAT
+    };
+  } else {
+    // Scenka - dodaj instrukcję na początku promptu
+    const STYLE_INSTRUCTION = "STYLE REFERENCE INSTRUCTION: The 5 reference images show Blocki-style figures on black backgrounds. IGNORE the black backgrounds. IGNORE the specific clothing, hairstyles, and colors of the reference figures. ONLY copy the body anatomy and proportions: rounded chunky bodies, soft curved arms without elbow segments, rounded shoe-shaped feet with visible toe, distinct rounded hip segment, softly rounded heads. Apply this body style to NEW figures appropriate to the scene described below. The figures in the output should NOT be the reference figures themselves — they should be NEW characters with new clothing matching the scene context, but built with the same body anatomy. ";
+
+    finalPrompt = STYLE_INSTRUCTION + brief.image_prompt_en;
+
+    requestBody = {
+      prompt: finalPrompt,
+      image_urls: REFERENCE_FIGURE_URLS,
+      num_images: 1,
+      aspect_ratio: IMAGE_ASPECT_RATIO,
+      output_format: IMAGE_OUTPUT_FORMAT,
+      resolution: '1K'
+    };
+  }
+
   try {
-    const res = await fetch(FAL_ENDPOINT, {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: brief.image_prompt_en,
-        num_images: 1,
-        aspect_ratio: IMAGE_ASPECT_RATIO,
-        output_format: IMAGE_OUTPUT_FORMAT
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!res.ok) {
@@ -488,10 +527,11 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
     }
     const { request_id } = await res.json();
 
-    const statusUrl = `${FAL_ENDPOINT}/requests/${request_id}/status`;
-    const resultUrl = `${FAL_ENDPOINT}/requests/${request_id}`;
+    const statusUrl = `${endpoint}/requests/${request_id}/status`;
+    const resultUrl = `${endpoint}/requests/${request_id}`;
 
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 240; i++) {
+      // Edit może być wolniejszy niż text-to-image, dłuższy timeout (2 min)
       await new Promise(r => setTimeout(r, 500));
       const s = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
       const sj = await s.json();
@@ -506,7 +546,7 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
         const filepath = path.join(IMAGES_DIR, imageFilename);
         await fs.writeFile(filepath, buf);
 
-        logTiming(sessionId, `image-${brief.id}`, startMs);
+        logTiming(sessionId, `image-${brief.id}`, startMs, isTotem ? '(text-to-image)' : '(edit z 5 ref)');
         return `/images/${imageFilename}`;
       }
       if (sj.status === 'FAILED') throw new Error(`fal failed: ${JSON.stringify(sj)}`);

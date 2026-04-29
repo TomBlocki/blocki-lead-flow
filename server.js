@@ -280,6 +280,19 @@ function buildBriefPrompt(config, research, guidelines) {
   const isTotem = config.format === 'totem';
   const formatDef = isTotem ? guidelines.totem_definition : guidelines.scenka_definition;
 
+  // Dla totemu — wymuszamy zakaz figurek na końcu prompta (różny od scenki)
+  const FORMAT_ENFORCEMENT = isTotem
+    ? `\n\nKRYTYCZNE — TOTEM ZAKAZUJE FIGUREK:
+NIE umieszczaj ŻADNYCH figurek ludzkich w kadrze. Totem to TYLKO jeden obiekt na postumencie z etykietą. Zero ludzi, zero postaci, zero minifigurek.
+
+OSTATNIE ZDANIE image_prompt_en MUSI brzmieć DOKŁADNIE:
+"ABSOLUTELY NO HUMAN FIGURES OR MINIFIGURES anywhere in the scene. Just the single sculptural object on its pedestal with a label. Empty studio background, no people, no characters, no living creatures."`
+    : `\n\nKRYTYCZNE — anatomia figurek:
+NIE pisz "cubic heads", "blocky figures", "standard LEGO minifigures" ani niczego co sugeruje klasyczne LEGO city. Figurki w scenkach MUSZĄ być w stylu Blocki (zaokrąglone kształty). Wszystkie figurki w jednym kadrze MUSZĄ mieć ten sam styl anatomiczny - bez mieszania.
+
+OSTATNIE ZDANIE image_prompt_en MUSI brzmieć DOKŁADNIE:
+"CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST share the same body style, with full visual consistency across every figure. Every figure has these specific physical proportions: chunky rounded plastic bodies with all body edges softly curved (no sharp angles anywhere), torso is a rectangular block with rounded corners, arms are smooth flowing curves without any elbow segment or joint, legs taper slightly at the knees with organic curvature, feet are rounded shoe shapes with a visible protruding toe (NOT square block ends), hip area is a distinct rounded segment between the torso and legs. Heads are softly rounded, not cubic. Do not mix figure styles within the same image — uniform consistent anatomy throughout."`;
+
   return `Jesteś art directorem Blocki Custom.
 
 Przygotuj brief wizualny dla Nano Banana 2 (Google Gemini 3.1 Flash Image) — model reasoning-guided, rozumie naturalny język i intent, NIE keywords.
@@ -314,12 +327,7 @@ Zasady dla image_prompt_en:
 - Oświetlenie: "professional product photography lighting on a neutral gray background"
 - Kolory: użyj konkretnych hex z palety
 - Długość: 400-800 znaków
-
-KRYTYCZNE — anatomia figurek:
-NIE pisz "cubic heads", "blocky figures", "standard LEGO minifigures" ani niczego co sugeruje klasyczne LEGO city. Figurki w scenkach MUSZĄ być w stylu Blocki (zaokrąglone kształty).
-
-OSTATNIE ZDANIE image_prompt_en MUSI brzmieć DOKŁADNIE:
-"All figures in the scene are Blocki-style minifigures, NOT standard LEGO: rounded smooth body shapes, flowing curved arms without elbow segments, rounded shoe-shaped feet with visible toe (not square blocks), distinct rounded hip joint between torso and legs, softly rounded heads (not cubic)."
+${FORMAT_ENFORCEMENT}
 
 JSON w \`\`\`json:
 
@@ -351,24 +359,29 @@ async function generateBrief(config, research, guidelines, sessionId, retryCount
   try {
     const parsed = safeParseJson(text, `brief-${config.id}`);
 
-    // GUARD RAIL: wymuszamy frazę Blocki anatomy na końcu image_prompt_en
+    // GUARD RAIL: wymuszamy frazę enforcement na końcu image_prompt_en
     // Niezależnie czy Claude ją dodał czy nie - kod dokleja jeśli brak
-    const BLOCKI_ANATOMY = "All figures in the scene are Blocki-style minifigures, NOT standard LEGO: rounded smooth body shapes, flowing curved arms without elbow segments, rounded shoe-shaped feet with visible toe (not square blocks), distinct rounded hip joint between torso and legs, softly rounded heads (not cubic).";
+    const isTotem = config.format === 'totem';
+    const BLOCKI_ANATOMY = "CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST share the same body style, with full visual consistency across every figure. Every figure has these specific physical proportions: chunky rounded plastic bodies with all body edges softly curved (no sharp angles anywhere), torso is a rectangular block with rounded corners, arms are smooth flowing curves without any elbow segment or joint, legs taper slightly at the knees with organic curvature, feet are rounded shoe shapes with a visible protruding toe (NOT square block ends), hip area is a distinct rounded segment between the torso and legs. Heads are softly rounded, not cubic. Do not mix figure styles within the same image — uniform consistent anatomy throughout.";
+    const TOTEM_NO_FIGURES = "ABSOLUTELY NO HUMAN FIGURES OR MINIFIGURES anywhere in the scene. Just the single sculptural object on its pedestal with a label. Empty studio background, no people, no characters, no living creatures.";
+    const ENFORCEMENT = isTotem ? TOTEM_NO_FIGURES : BLOCKI_ANATOMY;
+    const MARKER = isTotem ? 'ABSOLUTELY NO HUMAN FIGURES' : 'CRITICAL STYLE REQUIREMENT';
 
     if (parsed.image_prompt_en) {
-      // Usuwamy frazy które przyklepują LEGO (jeśli Claude je dał)
-      parsed.image_prompt_en = parsed.image_prompt_en
-        .replace(/\bcubic heads?\b/gi, 'rounded heads')
-        .replace(/\bcubic minifigures?\b/gi, 'Blocki-style minifigures')
-        .replace(/\bblocky minifigures?\b/gi, 'Blocki-style minifigures')
-        .replace(/\bstandard LEGO minifigures?\b/gi, 'Blocki-style minifigures');
+      // Usuwamy frazy które przyklepują LEGO (jeśli Claude je dał) - tylko dla scenek
+      if (!isTotem) {
+        parsed.image_prompt_en = parsed.image_prompt_en
+          .replace(/\bcubic heads?\b/gi, 'rounded heads')
+          .replace(/\bcubic minifigures?\b/gi, 'Blocki-style minifigures')
+          .replace(/\bblocky minifigures?\b/gi, 'Blocki-style minifigures')
+          .replace(/\bstandard LEGO minifigures?\b/gi, 'Blocki-style minifigures');
+      }
 
       // Sprawdź czy fraza już jest na końcu, jeśli nie - dodaj
-      if (!parsed.image_prompt_en.includes('Blocki-style minifigures, NOT standard LEGO')) {
-        // Trim i dodaj frazę
+      if (!parsed.image_prompt_en.includes(MARKER)) {
         parsed.image_prompt_en = parsed.image_prompt_en.trim();
         if (!parsed.image_prompt_en.endsWith('.')) parsed.image_prompt_en += '.';
-        parsed.image_prompt_en += ' ' + BLOCKI_ANATOMY;
+        parsed.image_prompt_en += ' ' + ENFORCEMENT;
       }
 
       // Limit długości
@@ -425,7 +438,7 @@ Wygeneruj zaktualizowany JSON w \`\`\`json.`;
   const parsed = safeParseJson(text, 'brief-rewrite');
 
   // GUARD RAIL: ta sama logika co w generateBrief
-  const BLOCKI_ANATOMY = "All figures in the scene are Blocki-style minifigures, NOT standard LEGO: rounded smooth body shapes, flowing curved arms without elbow segments, rounded shoe-shaped feet with visible toe (not square blocks), distinct rounded hip joint between torso and legs, softly rounded heads (not cubic).";
+  const BLOCKI_ANATOMY = "CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST share the same body style, with full visual consistency across every figure. Every figure has these specific physical proportions: chunky rounded plastic bodies with all body edges softly curved (no sharp angles anywhere), torso is a rectangular block with rounded corners, arms are smooth flowing curves without any elbow segment or joint, legs taper slightly at the knees with organic curvature, feet are rounded shoe shapes with a visible protruding toe (NOT square block ends), hip area is a distinct rounded segment between the torso and legs. Heads are softly rounded, not cubic. Do not mix figure styles within the same image — uniform consistent anatomy throughout.";
 
   if (parsed.image_prompt_en) {
     parsed.image_prompt_en = parsed.image_prompt_en
@@ -434,7 +447,7 @@ Wygeneruj zaktualizowany JSON w \`\`\`json.`;
       .replace(/\bblocky minifigures?\b/gi, 'Blocki-style minifigures')
       .replace(/\bstandard LEGO minifigures?\b/gi, 'Blocki-style minifigures');
 
-    if (!parsed.image_prompt_en.includes('Blocki-style minifigures, NOT standard LEGO')) {
+    if (!parsed.image_prompt_en.includes('CRITICAL STYLE REQUIREMENT')) {
       parsed.image_prompt_en = parsed.image_prompt_en.trim();
       if (!parsed.image_prompt_en.endsWith('.')) parsed.image_prompt_en += '.';
       parsed.image_prompt_en += ' ' + BLOCKI_ANATOMY;

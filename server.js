@@ -508,7 +508,7 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
       prompt: finalPrompt,
       image_urls: REFERENCE_FIGURE_URLS,
       num_images: 1,
-      aspect_ratio: IMAGE_ASPECT_RATIO,
+      aspect_ratio: 'auto',
       output_format: IMAGE_OUTPUT_FORMAT,
       resolution: '1K'
     };
@@ -523,9 +523,23 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`fal submit ${res.status}: ${errText}`);
+      console.log(`[${sessionId}] fal submit failed (${res.status}). Endpoint: ${endpoint}. Body sent: ${JSON.stringify(requestBody).slice(0, 500)}. Response: ${errText.slice(0, 500)}`);
+      throw new Error(`fal submit ${res.status}: ${errText.slice(0, 200)}`);
     }
-    const { request_id } = await res.json();
+
+    const submitText = await res.text();
+    let submitJson;
+    try {
+      submitJson = JSON.parse(submitText);
+    } catch (e) {
+      console.log(`[${sessionId}] fal submit returned non-JSON. Response: ${submitText.slice(0, 500)}`);
+      throw new Error(`fal submit returned non-JSON: ${submitText.slice(0, 200)}`);
+    }
+    const { request_id } = submitJson;
+    if (!request_id) {
+      console.log(`[${sessionId}] fal submit no request_id. Response: ${submitText.slice(0, 500)}`);
+      throw new Error(`fal submit no request_id`);
+    }
 
     const statusUrl = `${endpoint}/requests/${request_id}/status`;
     const resultUrl = `${endpoint}/requests/${request_id}`;

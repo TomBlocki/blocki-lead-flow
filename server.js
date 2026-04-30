@@ -541,8 +541,13 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
       throw new Error(`fal submit no request_id`);
     }
 
-    const statusUrl = `${endpoint}/requests/${request_id}/status`;
-    const resultUrl = `${endpoint}/requests/${request_id}`;
+    // KRYTYCZNE: status i wynik leci na bazowy queue URL bez sufiksu /edit
+    // Submit: queue.fal.run/fal-ai/nano-banana-2/edit (POST)
+    // Status: queue.fal.run/fal-ai/nano-banana-2/requests/{id}/status (GET, BEZ /edit)
+    // Result: queue.fal.run/fal-ai/nano-banana-2/requests/{id} (GET, BEZ /edit)
+    const queueBaseUrl = 'https://queue.fal.run/fal-ai/nano-banana-2';
+    const statusUrl = `${queueBaseUrl}/requests/${request_id}/status`;
+    const resultUrl = `${queueBaseUrl}/requests/${request_id}`;
 
     for (let i = 0; i < 240; i++) {
       // Edit może być wolniejszy niż text-to-image, dłuższy timeout (2 min)

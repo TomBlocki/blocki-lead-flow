@@ -481,6 +481,84 @@ Wygeneruj zaktualizowany JSON w \`\`\`json.`;
 // =============================================
 // IMAGE GEN — Nano Banana 2
 // =============================================
+// Helper: submit fal request, czeka na wynik, zwraca URL gotowego obrazka
+async function submitFalRequest(endpoint, queueBaseUrl, requestBody, FAL_KEY, sessionId, label) {
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody)
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.log(`[${sessionId}] fal ${label} submit failed (${res.status}). Endpoint: ${endpoint}. Body: ${JSON.stringify(requestBody).slice(0, 300)}. Response: ${errText.slice(0, 500)}`);
+    throw new Error(`fal ${label} submit ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const submitText = await res.text();
+  let submitJson;
+  try {
+    submitJson = JSON.parse(submitText);
+  } catch (e) {
+    console.log(`[${sessionId}] fal ${label} submit non-JSON: ${submitText.slice(0, 500)}`);
+    throw new Error(`fal ${label} submit non-JSON: ${submitText.slice(0, 200)}`);
+  }
+  const { request_id } = submitJson;
+  if (!request_id) {
+    console.log(`[${sessionId}] fal ${label} no request_id: ${submitText.slice(0, 500)}`);
+    throw new Error(`fal ${label} no request_id`);
+  }
+
+  const statusUrl = `${queueBaseUrl}/requests/${request_id}/status`;
+  const resultUrl = `${queueBaseUrl}/requests/${request_id}`;
+
+  for (let i = 0; i < 240; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const s = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+    if (!s.ok) {
+      const errText = await s.text();
+      console.log(`[${sessionId}] fal ${label} status check failed (${s.status}). URL: ${statusUrl}. Response: ${errText.slice(0, 500)}`);
+      throw new Error(`fal ${label} status ${s.status}: ${errText.slice(0, 200)}`);
+    }
+    const statusText = await s.text();
+    let sj;
+    try {
+      sj = JSON.parse(statusText);
+    } catch (e) {
+      console.log(`[${sessionId}] fal ${label} status non-JSON: ${statusText.slice(0, 500)}`);
+      throw new Error(`fal ${label} status non-JSON: ${statusText.slice(0, 200)}`);
+    }
+
+    if (sj.status === 'COMPLETED') {
+      const r = await fetch(resultUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
+      if (!r.ok) {
+        const errText = await r.text();
+        console.log(`[${sessionId}] fal ${label} result fetch failed (${r.status}). URL: ${resultUrl}. Response: ${errText.slice(0, 500)}`);
+        throw new Error(`fal ${label} result ${r.status}: ${errText.slice(0, 200)}`);
+      }
+      const resultText = await r.text();
+      let rj;
+      try {
+        rj = JSON.parse(resultText);
+      } catch (e) {
+        console.log(`[${sessionId}] fal ${label} result non-JSON: ${resultText.slice(0, 500)}`);
+        throw new Error(`fal ${label} result non-JSON: ${resultText.slice(0, 200)}`);
+      }
+      const url = rj.images?.[0]?.url;
+      if (!url) {
+        console.log(`[${sessionId}] fal ${label} no image URL. Response: ${JSON.stringify(rj).slice(0, 500)}`);
+        throw new Error(`fal ${label} brak URL`);
+      }
+      return url;
+    }
+    if (sj.status === 'FAILED') {
+      console.log(`[${sessionId}] fal ${label} job FAILED. Status: ${JSON.stringify(sj).slice(0, 500)}`);
+      throw new Error(`fal ${label} failed: ${JSON.stringify(sj).slice(0, 200)}`);
+    }
+  }
+  throw new Error(`fal ${label} timeout`);
+}
+
 async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
   const startMs = now();
   const FAL_KEY = process.env.FAL_KEY;
@@ -489,129 +567,84 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
 
   const isTotem = brief.format === 'totem';
 
-  // Totem -> standard text-to-image (bez figurek, bez referencji)
-  // Scenka -> edit endpoint z referencjami stylu figurek Blocki
-  const endpoint = isTotem ? FAL_ENDPOINT : FAL_EDIT_ENDPOINT;
-
-  // Dla scenek - wzbogacamy prompt o instrukcję jak używać referencji
-  let finalPrompt = brief.image_prompt_en;
-  let requestBody;
-
-  if (isTotem) {
-    requestBody = {
-      prompt: finalPrompt,
-      num_images: 1,
-      aspect_ratio: IMAGE_ASPECT_RATIO,
-      output_format: IMAGE_OUTPUT_FORMAT
-    };
-  } else {
-    // Scenka - dodaj instrukcję na początku promptu
-    const STYLE_INSTRUCTION = "CRITICAL STYLE REFERENCE PROTOCOL: 5 reference images are attached showing the EXACT physical anatomy required for ALL figures in the output. These references are NOT characters to insert — they are an anatomy reference template. Study these specific body features from the references and apply them to ALL new figures you generate:\n\n1. LEGS — Look at how the legs in the references are shaped: they are smooth rounded plastic forms with subtle organic curvature, NOT straight rectangular blocks. The legs taper slightly. Reproduce this leg shape in every figure.\n\n2. FEET — This is critical. Look carefully at the feet in the reference images: they are clearly shoe-shaped with a visible protruding TOE at the front, like a real shoe. They are NOT flat square block ends like standard LEGO minifigures. Every figure in the output MUST have these rounded shoe-shaped feet with a protruding toe. NO square block feet anywhere.\n\n3. HIPS — Notice the distinct rounded hip segment between the torso and legs in the references. It looks like a separate pelvis piece. Include this in every figure.\n\n4. ARMS — Smooth flowing curves, no elbow segment.\n\n5. TORSO — Rectangular shape but with softly rounded corners, not sharp trapezoidal LEGO torsos.\n\nIGNORE the black backgrounds. IGNORE the specific clothing, hair colors, and accessories of the reference figures. The figures in your output should be NEW characters wearing clothing appropriate to the scene below — but their bodies, especially their LEGS and FEET, must match the Blocki anatomy shown in the references. Even small or background figures must follow this. Do NOT use standard LEGO city minifigure body parts anywhere — particularly NOT the square block feet which are the most common LEGO feature to avoid.\n\nNOW, the scene description: ";
-
-    finalPrompt = STYLE_INSTRUCTION + brief.image_prompt_en;
-
-    requestBody = {
-      prompt: finalPrompt,
-      image_urls: REFERENCE_FIGURE_URLS,
-      num_images: 1,
-      aspect_ratio: 'auto',
-      output_format: IMAGE_OUTPUT_FORMAT,
-      resolution: '1K'
-    };
-  }
-
   try {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Authorization': `Key ${FAL_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
+    let finalImageUrl;
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.log(`[${sessionId}] fal submit failed (${res.status}). Endpoint: ${endpoint}. Body sent: ${JSON.stringify(requestBody).slice(0, 500)}. Response: ${errText.slice(0, 500)}`);
-      throw new Error(`fal submit ${res.status}: ${errText.slice(0, 200)}`);
+    if (isTotem) {
+      // TOTEM: jeden pass, nano-banana-2 standard, text-to-image bez referencji
+      const requestBody = {
+        prompt: brief.image_prompt_en,
+        num_images: 1,
+        aspect_ratio: IMAGE_ASPECT_RATIO,
+        output_format: IMAGE_OUTPUT_FORMAT
+      };
+      finalImageUrl = await submitFalRequest(
+        FAL_ENDPOINT,
+        'https://queue.fal.run/fal-ai/nano-banana-2',
+        requestBody,
+        FAL_KEY,
+        sessionId,
+        'totem'
+      );
+    } else {
+      // SCENKA: 2-pass workflow
+      // Pass 1: Pro/edit z 5 referencjami -> daje kompozycję + częściowo Blocki anatomy
+      // Pass 2: Pro/edit z wynikiem Pass 1 jako wsadem -> wymusza pełną Blocki anatomy
+
+      const PASS_1_INSTRUCTION = "CRITICAL STYLE REFERENCE PROTOCOL: 5 reference images are attached showing the EXACT physical anatomy required for ALL figures in the output. These references are NOT characters to insert — they are an anatomy reference template. Study these specific body features from the references and apply them to ALL new figures you generate:\n\n1. LEGS — Look at how the legs in the references are shaped: they are smooth rounded plastic forms with subtle organic curvature, NOT straight rectangular blocks. The legs taper slightly. Reproduce this leg shape in every figure.\n\n2. FEET — This is critical. Look carefully at the feet in the reference images: they are clearly shoe-shaped with a visible protruding TOE at the front, like a real shoe. They are NOT flat square block ends like standard LEGO minifigures. Every figure in the output MUST have these rounded shoe-shaped feet with a protruding toe. NO square block feet anywhere.\n\n3. HIPS — Notice the distinct rounded hip segment between the torso and legs in the references. It looks like a separate pelvis piece. Include this in every figure.\n\n4. ARMS — Smooth flowing curves, no elbow segment.\n\n5. TORSO — Rectangular shape but with softly rounded corners, not sharp trapezoidal LEGO torsos.\n\nIGNORE the black backgrounds. IGNORE the specific clothing, hair colors, and accessories of the reference figures. The figures in your output should be NEW characters wearing clothing appropriate to the scene below — but their bodies, especially their LEGS and FEET, must match the Blocki anatomy shown in the references. Even small or background figures must follow this. Do NOT use standard LEGO city minifigure body parts anywhere — particularly NOT the square block feet which are the most common LEGO feature to avoid.\n\nNOW, the scene description: ";
+
+      const pass1Body = {
+        prompt: PASS_1_INSTRUCTION + brief.image_prompt_en,
+        image_urls: REFERENCE_FIGURE_URLS,
+        num_images: 1,
+        aspect_ratio: 'auto',
+        output_format: IMAGE_OUTPUT_FORMAT,
+        resolution: '1K'
+      };
+
+      console.log(`[${sessionId}] image-${brief.id}: Pass 1/2 (kompozycja z referencjami)...`);
+      const pass1Url = await submitFalRequest(
+        FAL_EDIT_ENDPOINT,
+        'https://queue.fal.run/fal-ai/nano-banana-pro',
+        pass1Body,
+        FAL_KEY,
+        sessionId,
+        'pass1'
+      );
+
+      // Pass 2: refinement - wynik Pass 1 jako 6. obrazek + 5 referencji
+      // Model dostaje wygenerowany obrazek + referencje stylu, ma tylko poprawić figurki
+      const PASS_2_INSTRUCTION = "REFINEMENT TASK: The first image is a scene that has been generated. The remaining 5 images are anatomy reference templates showing the required Blocki figure style. Your task: keep EVERYTHING in the first image identical (background, buildings, vehicles, props, layout, colors, lighting, composition, camera angle) but REPLACE every figure's body anatomy to match the Blocki style from the reference images. Specifically: (1) replace square block feet with rounded shoe-shaped feet with a protruding toe at the front, (2) replace rectangular block legs with smooth rounded legs that taper slightly, (3) ensure each figure has a distinct rounded hip segment between torso and legs, (4) make arms smooth flowing curves without elbow segments, (5) keep heads, faces, clothing, hairstyles, and skin tones EXACTLY as they are in the first image — only modify body anatomy below the head. Do NOT change the scene composition, do NOT add or remove figures, do NOT change clothing colors. ONLY refine body anatomy of existing figures to match Blocki references. Output a refined version of the first image with corrected figure anatomy.";
+
+      const pass2Body = {
+        prompt: PASS_2_INSTRUCTION,
+        image_urls: [pass1Url, ...REFERENCE_FIGURE_URLS],
+        num_images: 1,
+        aspect_ratio: 'auto',
+        output_format: IMAGE_OUTPUT_FORMAT,
+        resolution: '1K'
+      };
+
+      console.log(`[${sessionId}] image-${brief.id}: Pass 2/2 (refinement anatomii)...`);
+      finalImageUrl = await submitFalRequest(
+        FAL_EDIT_ENDPOINT,
+        'https://queue.fal.run/fal-ai/nano-banana-pro',
+        pass2Body,
+        FAL_KEY,
+        sessionId,
+        'pass2'
+      );
     }
 
-    const submitText = await res.text();
-    let submitJson;
-    try {
-      submitJson = JSON.parse(submitText);
-    } catch (e) {
-      console.log(`[${sessionId}] fal submit returned non-JSON. Response: ${submitText.slice(0, 500)}`);
-      throw new Error(`fal submit returned non-JSON: ${submitText.slice(0, 200)}`);
-    }
-    const { request_id } = submitJson;
-    if (!request_id) {
-      console.log(`[${sessionId}] fal submit no request_id. Response: ${submitText.slice(0, 500)}`);
-      throw new Error(`fal submit no request_id`);
-    }
+    // Pobierz finalny obrazek i zapisz lokalnie
+    const imgRes = await fetch(finalImageUrl);
+    if (!imgRes.ok) throw new Error(`image download ${imgRes.status}`);
+    const buf = Buffer.from(await imgRes.arrayBuffer());
+    const filepath = path.join(IMAGES_DIR, imageFilename);
+    await fs.writeFile(filepath, buf);
 
-    // KRYTYCZNE: status i wynik leci na bazowy queue URL bez sufiksu /edit
-    // Dla totemu (nano-banana-2): queue.fal.run/fal-ai/nano-banana-2/requests/{id}
-    // Dla scenki (nano-banana-pro/edit): queue.fal.run/fal-ai/nano-banana-pro/requests/{id}
-    const queueBaseUrl = isTotem
-      ? 'https://queue.fal.run/fal-ai/nano-banana-2'
-      : 'https://queue.fal.run/fal-ai/nano-banana-pro';
-    const statusUrl = `${queueBaseUrl}/requests/${request_id}/status`;
-    const resultUrl = `${queueBaseUrl}/requests/${request_id}`;
-
-    for (let i = 0; i < 240; i++) {
-      // Edit może być wolniejszy niż text-to-image, dłuższy timeout (2 min)
-      await new Promise(r => setTimeout(r, 500));
-      const s = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
-      if (!s.ok) {
-        const errText = await s.text();
-        console.log(`[${sessionId}] fal status check failed (${s.status}). URL: ${statusUrl}. Response: ${errText.slice(0, 500)}`);
-        throw new Error(`fal status ${s.status}: ${errText.slice(0, 200)}`);
-      }
-      const statusText = await s.text();
-      let sj;
-      try {
-        sj = JSON.parse(statusText);
-      } catch (e) {
-        console.log(`[${sessionId}] fal status returned non-JSON. Response: ${statusText.slice(0, 500)}`);
-        throw new Error(`fal status non-JSON: ${statusText.slice(0, 200)}`);
-      }
-
-      if (sj.status === 'COMPLETED') {
-        const r = await fetch(resultUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
-        if (!r.ok) {
-          const errText = await r.text();
-          console.log(`[${sessionId}] fal result fetch failed (${r.status}). URL: ${resultUrl}. Response: ${errText.slice(0, 500)}`);
-          throw new Error(`fal result ${r.status}: ${errText.slice(0, 200)}`);
-        }
-        const resultText = await r.text();
-        let rj;
-        try {
-          rj = JSON.parse(resultText);
-        } catch (e) {
-          console.log(`[${sessionId}] fal result returned non-JSON. Response: ${resultText.slice(0, 500)}`);
-          throw new Error(`fal result non-JSON: ${resultText.slice(0, 200)}`);
-        }
-        const url = rj.images?.[0]?.url;
-        if (!url) {
-          console.log(`[${sessionId}] fal result has no image URL. Full response: ${JSON.stringify(rj).slice(0, 800)}`);
-          throw new Error('brak URL');
-        }
-
-        const imgRes = await fetch(url);
-        if (!imgRes.ok) {
-          throw new Error(`fal image download ${imgRes.status}`);
-        }
-        const buf = Buffer.from(await imgRes.arrayBuffer());
-        const filepath = path.join(IMAGES_DIR, imageFilename);
-        await fs.writeFile(filepath, buf);
-
-        logTiming(sessionId, `image-${brief.id}`, startMs, isTotem ? '(text-to-image)' : '(edit z 5 ref)');
-        return `/images/${imageFilename}`;
-      }
-      if (sj.status === 'FAILED') {
-        console.log(`[${sessionId}] fal job FAILED. Full status: ${JSON.stringify(sj).slice(0, 800)}`);
-        throw new Error(`fal failed: ${JSON.stringify(sj).slice(0, 300)}`);
-      }
-    }
-    throw new Error('fal timeout');
+    logTiming(sessionId, `image-${brief.id}`, startMs, isTotem ? '(text-to-image)' : '(2-pass Pro)');
+    return `/images/${imageFilename}`;
   } catch (err) {
     if (retryCount < 2) {
       console.log(`[${sessionId}] ⚠️  image-${brief.id} failed (próba ${retryCount + 1}/3): ${err.message}, retry...`);
@@ -621,6 +654,7 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
     throw err;
   }
 }
+
 
 // =============================================
 // COMPACT RESEARCH FOR BRIEFS

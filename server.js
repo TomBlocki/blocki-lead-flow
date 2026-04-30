@@ -294,15 +294,21 @@ function buildBriefPrompt(config, research, guidelines) {
   // Dla totemu — wymuszamy zakaz figurek na końcu prompta (różny od scenki)
   const FORMAT_ENFORCEMENT = isTotem
     ? `\n\nKRYTYCZNE — TOTEM ZAKAZUJE FIGUREK:
-NIE umieszczaj ŻADNYCH figurek ludzkich w kadrze. Totem to TYLKO jeden obiekt na postumencie z etykietą. Zero ludzi, zero postaci, zero minifigurek.
+TOTEM to ABSTRAKCYJNA RZEŹBA - jeden obiekt symboliczny na postumencie. NIGDY nie zawiera ludzi, robotników, pracowników, ani postaci.
+
+Pisząc image_prompt_en MUSISZ:
+- NIE używać słów: "workers", "employees", "people", "workers", "minifigures", "figures", "characters", "operators", "engineers", "team"
+- Opisać TYLKO główny obiekt-symbol (np. maszyna, narzędzie, urządzenie produkcyjne) i postument
+- Skupić się na bryle, kształcie, kolorach, etykiecie
+- NIE opisywać żadnej akcji ani działania - tylko statyczny obiekt
 
 OSTATNIE ZDANIE image_prompt_en MUSI brzmieć DOKŁADNIE:
-"ABSOLUTELY NO HUMAN FIGURES OR MINIFIGURES anywhere in the scene. Just the single sculptural object on its pedestal with a label. Empty studio background, no people, no characters, no living creatures."`
+"ABSOLUTELY NO HUMAN FIGURES, NO MINIFIGURES, NO PEOPLE, NO WORKERS anywhere in the scene. Just the single sculptural object on its pedestal with a label. Empty studio background, no characters, no living creatures, no action — purely a static sculptural display."`
     : `\n\nKRYTYCZNE — anatomia figurek:
 NIE pisz "cubic heads", "blocky figures", "standard LEGO minifigures" ani niczego co sugeruje klasyczne LEGO city. Figurki w scenkach MUSZĄ być w stylu Blocki (zaokrąglone kształty). Wszystkie figurki w jednym kadrze MUSZĄ mieć ten sam styl anatomiczny - bez mieszania.
 
 OSTATNIE ZDANIE image_prompt_en MUSI brzmieć DOKŁADNIE:
-"CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST share the same body style, with full visual consistency across every figure. Every figure has these specific physical proportions: chunky rounded plastic bodies with all body edges softly curved (no sharp angles anywhere), torso is a rectangular block with rounded corners, arms are smooth flowing curves without any elbow segment or joint, legs taper slightly at the knees with organic curvature, feet are rounded shoe shapes with a visible protruding toe (NOT square block ends), hip area is a distinct rounded segment between the torso and legs. Heads are softly rounded, not cubic. Do not mix figure styles within the same image — uniform consistent anatomy throughout."`;
+"CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST match the reference image anatomy. Most importantly: legs are smooth rounded forms with organic taper (NOT rectangular block legs), and feet are rounded shoe shapes with a clearly protruding toe at the front like a real shoe (NOT flat square block ends). This applies to EVERY figure including small or background figures. Avoid standard LEGO city minifigure legs and feet completely — those square block legs and flat square feet are wrong. Other body features: torso rectangular with rounded corners, arms smooth flowing curves without elbow segments, distinct rounded hip segment between torso and legs. Uniform consistent anatomy across all figures in the scene — do not mix Blocki anatomy with standard LEGO anatomy."`;
 
   return `Jesteś art directorem Blocki Custom.
 
@@ -373,7 +379,7 @@ async function generateBrief(config, research, guidelines, sessionId, retryCount
     // GUARD RAIL: wymuszamy frazę enforcement na końcu image_prompt_en
     // Niezależnie czy Claude ją dodał czy nie - kod dokleja jeśli brak
     const isTotem = config.format === 'totem';
-    const BLOCKI_ANATOMY = "CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST share the same body style, with full visual consistency across every figure. Every figure has these specific physical proportions: chunky rounded plastic bodies with all body edges softly curved (no sharp angles anywhere), torso is a rectangular block with rounded corners, arms are smooth flowing curves without any elbow segment or joint, legs taper slightly at the knees with organic curvature, feet are rounded shoe shapes with a visible protruding toe (NOT square block ends), hip area is a distinct rounded segment between the torso and legs. Heads are softly rounded, not cubic. Do not mix figure styles within the same image — uniform consistent anatomy throughout.";
+    const BLOCKI_ANATOMY = "CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST match the reference image anatomy. Most importantly: legs are smooth rounded forms with organic taper (NOT rectangular block legs), and feet are rounded shoe shapes with a clearly protruding toe at the front like a real shoe (NOT flat square block ends). This applies to EVERY figure including small or background figures. Avoid standard LEGO city minifigure legs and feet completely — those square block legs and flat square feet are wrong. Other body features: torso rectangular with rounded corners, arms smooth flowing curves without elbow segments, distinct rounded hip segment between torso and legs. Uniform consistent anatomy across all figures in the scene — do not mix Blocki anatomy with standard LEGO anatomy.";
     const TOTEM_NO_FIGURES = "ABSOLUTELY NO HUMAN FIGURES OR MINIFIGURES anywhere in the scene. Just the single sculptural object on its pedestal with a label. Empty studio background, no people, no characters, no living creatures.";
     const ENFORCEMENT = isTotem ? TOTEM_NO_FIGURES : BLOCKI_ANATOMY;
     const MARKER = isTotem ? 'ABSOLUTELY NO HUMAN FIGURES' : 'CRITICAL STYLE REQUIREMENT';
@@ -449,7 +455,7 @@ Wygeneruj zaktualizowany JSON w \`\`\`json.`;
   const parsed = safeParseJson(text, 'brief-rewrite');
 
   // GUARD RAIL: ta sama logika co w generateBrief
-  const BLOCKI_ANATOMY = "CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST share the same body style, with full visual consistency across every figure. Every figure has these specific physical proportions: chunky rounded plastic bodies with all body edges softly curved (no sharp angles anywhere), torso is a rectangular block with rounded corners, arms are smooth flowing curves without any elbow segment or joint, legs taper slightly at the knees with organic curvature, feet are rounded shoe shapes with a visible protruding toe (NOT square block ends), hip area is a distinct rounded segment between the torso and legs. Heads are softly rounded, not cubic. Do not mix figure styles within the same image — uniform consistent anatomy throughout.";
+  const BLOCKI_ANATOMY = "CRITICAL STYLE REQUIREMENT — ALL figures in this scene MUST match the reference image anatomy. Most importantly: legs are smooth rounded forms with organic taper (NOT rectangular block legs), and feet are rounded shoe shapes with a clearly protruding toe at the front like a real shoe (NOT flat square block ends). This applies to EVERY figure including small or background figures. Avoid standard LEGO city minifigure legs and feet completely — those square block legs and flat square feet are wrong. Other body features: torso rectangular with rounded corners, arms smooth flowing curves without elbow segments, distinct rounded hip segment between torso and legs. Uniform consistent anatomy across all figures in the scene — do not mix Blocki anatomy with standard LEGO anatomy.";
 
   if (parsed.image_prompt_en) {
     parsed.image_prompt_en = parsed.image_prompt_en
@@ -500,7 +506,7 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
     };
   } else {
     // Scenka - dodaj instrukcję na początku promptu
-    const STYLE_INSTRUCTION = "STYLE REFERENCE INSTRUCTION: The 5 reference images show Blocki-style figures on black backgrounds. IGNORE the black backgrounds. IGNORE the specific clothing, hairstyles, and colors of the reference figures. ONLY copy the body anatomy and proportions: rounded chunky bodies, soft curved arms without elbow segments, rounded shoe-shaped feet with visible toe, distinct rounded hip segment, softly rounded heads. Apply this body style to NEW figures appropriate to the scene described below. The figures in the output should NOT be the reference figures themselves — they should be NEW characters with new clothing matching the scene context, but built with the same body anatomy. ";
+    const STYLE_INSTRUCTION = "CRITICAL STYLE REFERENCE PROTOCOL: 5 reference images are attached showing the EXACT physical anatomy required for ALL figures in the output. These references are NOT characters to insert — they are an anatomy reference template. Study these specific body features from the references and apply them to ALL new figures you generate:\n\n1. LEGS — Look at how the legs in the references are shaped: they are smooth rounded plastic forms with subtle organic curvature, NOT straight rectangular blocks. The legs taper slightly. Reproduce this leg shape in every figure.\n\n2. FEET — This is critical. Look carefully at the feet in the reference images: they are clearly shoe-shaped with a visible protruding TOE at the front, like a real shoe. They are NOT flat square block ends like standard LEGO minifigures. Every figure in the output MUST have these rounded shoe-shaped feet with a protruding toe. NO square block feet anywhere.\n\n3. HIPS — Notice the distinct rounded hip segment between the torso and legs in the references. It looks like a separate pelvis piece. Include this in every figure.\n\n4. ARMS — Smooth flowing curves, no elbow segment.\n\n5. TORSO — Rectangular shape but with softly rounded corners, not sharp trapezoidal LEGO torsos.\n\nIGNORE the black backgrounds. IGNORE the specific clothing, hair colors, and accessories of the reference figures. The figures in your output should be NEW characters wearing clothing appropriate to the scene below — but their bodies, especially their LEGS and FEET, must match the Blocki anatomy shown in the references. Even small or background figures must follow this. Do NOT use standard LEGO city minifigure body parts anywhere — particularly NOT the square block feet which are the most common LEGO feature to avoid.\n\nNOW, the scene description: ";
 
     finalPrompt = STYLE_INSTRUCTION + brief.image_prompt_en;
 

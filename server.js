@@ -34,6 +34,20 @@ const REFERENCE_FIGURE_URLS = [
   'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/figurka5.png'
 ];
 
+// Referencyjne scenki Blocki - całe diorama z opakowań (wykadrowane fragmenty bez ramki pudełka)
+// Pokazują modelowi GATUNEK scenki Blocki: budynki, figurki w kontekście, baseplate
+const REFERENCE_SCENE_URLS = [
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/scenka1.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/scenka2.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/scenka3.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/scenka4.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/scenka5.png',
+  'https://raw.githubusercontent.com/TomBlocki/blocki-lead-flow/main/refs/scenka6.png'
+];
+
+// Wszystkie referencje razem (do edit endpointa)
+const ALL_REFERENCES = [...REFERENCE_FIGURE_URLS, ...REFERENCE_SCENE_URLS];
+
 const MAX_SEARCHES_PER_ANCHOR = 2;
 const PAUSE_BETWEEN_ANCHORS_MS = 20000; // 20s pauzy żeby nie wyczerpać rate limit
 const RESEARCH_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -607,11 +621,11 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
       // Strategia: brief Claude'a teraz wymusza 3 figurki, statyczne pozy, bez słowa "minifigure"
       // + STYLE_INSTRUCTION jako wprowadzenie
 
-      const STYLE_INSTRUCTION = "ANATOMY REFERENCE PROTOCOL: The 5 reference images attached show the required body anatomy for figures in this scene. CRITICAL — figures must have:\n\n1. ROUNDED SHOE-SHAPED FEET with a clearly protruding toe at the front (like a real shoe), NOT square block feet.\n2. SMOOTH ROUNDED LEGS that taper slightly toward the feet, NOT straight rectangular block legs.\n3. DISTINCT ROUNDED HIP segment between torso and legs.\n4. SMOOTH CURVED ARMS without elbow joints.\n5. RECTANGULAR TORSO with softly rounded corners.\n\nThese 5 features come from the reference images. IGNORE the black backgrounds and specific clothing in the references — only copy the body anatomy. The figures in the output should be new characters appropriate to the scene, but with this exact body anatomy. The figures should be LARGE and PROMINENT in the foreground — they are the focus of the composition, not background details.\n\nDo NOT use standard LEGO City minifigure anatomy — particularly avoid square block feet and rectangular block legs which are LEGO defaults.\n\nNOW, the scene to generate: ";
+      const STYLE_INSTRUCTION = "REFERENCE PROTOCOL: 11 reference images attached, in two groups:\n\nIMAGES 1-5 (figure anatomy reference): close-up portraits of figures showing the EXACT body anatomy required. Study these for: rounded shoe-shaped feet with protruding toe (NOT square block feet), smooth rounded legs with slight taper (NOT rectangular blocks), distinct rounded hip segment between torso and legs, smooth curved arms without elbow joints, rectangular torso with rounded corners.\n\nIMAGES 6-11 (scene composition reference): full Blocki dioramas showing the GENRE — how scenes are composed, scale of figures relative to props, baseplate density, building style, lighting, color palette. Study these for the overall feel of a Blocki scene.\n\nCRITICAL — IGNORE in ALL reference images: any logos (Blocki logo, client logos), any text or labels (compatible with other brands, language flags, product codes, slogans), any colored borders or box edges, any stock photo backgrounds (grass, construction sites, sky, urban scenery). DO NOT reproduce any of these in the output. Only copy the figures' body anatomy and the scene composition style.\n\nThe output should be a NEW scene with NEW characters appropriate to the description below. Use the figure anatomy from images 1-5 and the composition style from images 6-11. Place the scene on a clean professional studio background, NOT on grass or stock environments.\n\nNOW, the scene to generate: ";
 
       const requestBody = {
         prompt: STYLE_INSTRUCTION + brief.image_prompt_en,
-        image_urls: REFERENCE_FIGURE_URLS,
+        image_urls: ALL_REFERENCES,
         num_images: 1,
         aspect_ratio: 'auto',
         output_format: IMAGE_OUTPUT_FORMAT,

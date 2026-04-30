@@ -344,6 +344,17 @@ Zasady dla image_prompt_en:
 - Oświetlenie: "professional product photography lighting on a neutral gray background"
 - Kolory: użyj konkretnych hex z palety
 - Długość: 400-800 znaków
+
+ZASADY DLA SCENEK (jeśli format = scenka):
+- DOKŁADNIE 3 figurki w pierwszym planie (nie więcej, nie mniej)
+- Figurki MUSZĄ być DUŻE i WIDOCZNE w kadrze: "Three large prominent figures occupy the foreground, taking up substantial visual space"
+- ZARAZ po wzmiance figurek, NATYCHMIAST opisz ich anatomię: "These figures have chunky rounded plastic bodies with smooth curved limbs, rounded shoe-shaped feet with protruding toes, and softly rounded body proportions matching the reference style. NOT standard LEGO minifigure anatomy."
+- Dopiero POTEM opisz role i akcje (np. "kierowca trzymający dokumenty, mechanik z kluczem, magazynier obok palet")
+- POZY STATYCZNE: figurki "stand", "hold", "are positioned next to" — NIGDY "actively loading", "operating", "monitoring", "in motion", "gesturing dynamically"
+- ZABRONIONE SŁOWO: NIGDY nie używaj słowa "minifigure" lub "minifigures" — używaj "figures", "characters" lub "people"
+- Role są OK (kierowca, magazynier, inżynier) ale używaj ich raz, krótko, bez rozbudowanych opisów ubrań
+
+ZASADY DLA TOTEMÓW: pozostają niezmienione (zero figurek)
 ${FORMAT_ENFORCEMENT}
 
 JSON w \`\`\`json:
@@ -389,9 +400,11 @@ async function generateBrief(config, research, guidelines, sessionId, retryCount
       if (!isTotem) {
         parsed.image_prompt_en = parsed.image_prompt_en
           .replace(/\bcubic heads?\b/gi, 'rounded heads')
-          .replace(/\bcubic minifigures?\b/gi, 'Blocki-style minifigures')
-          .replace(/\bblocky minifigures?\b/gi, 'Blocki-style minifigures')
-          .replace(/\bstandard LEGO minifigures?\b/gi, 'Blocki-style minifigures');
+          .replace(/\bcubic minifigures?\b/gi, 'figures')
+          .replace(/\bblocky minifigures?\b/gi, 'figures')
+          .replace(/\bstandard LEGO minifigures?\b/gi, 'figures')
+          .replace(/\bLEGO minifigures?\b/gi, 'figures')
+          .replace(/\bminifigures?\b/gi, 'figures');
       }
 
       // Sprawdź czy fraza już jest na końcu, jeśli nie - dodaj
@@ -460,9 +473,11 @@ Wygeneruj zaktualizowany JSON w \`\`\`json.`;
   if (parsed.image_prompt_en) {
     parsed.image_prompt_en = parsed.image_prompt_en
       .replace(/\bcubic heads?\b/gi, 'rounded heads')
-      .replace(/\bcubic minifigures?\b/gi, 'Blocki-style minifigures')
-      .replace(/\bblocky minifigures?\b/gi, 'Blocki-style minifigures')
-      .replace(/\bstandard LEGO minifigures?\b/gi, 'Blocki-style minifigures');
+      .replace(/\bcubic minifigures?\b/gi, 'figures')
+      .replace(/\bblocky minifigures?\b/gi, 'figures')
+      .replace(/\bstandard LEGO minifigures?\b/gi, 'figures')
+      .replace(/\bLEGO minifigures?\b/gi, 'figures')
+      .replace(/\bminifigures?\b/gi, 'figures');
 
     if (!parsed.image_prompt_en.includes('CRITICAL STYLE REQUIREMENT')) {
       parsed.image_prompt_en = parsed.image_prompt_en.trim();
@@ -587,14 +602,15 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
         'totem'
       );
     } else {
-      // SCENKA: 2-pass workflow
-      // Pass 1: Pro/edit z 5 referencjami -> daje kompozycję + częściowo Blocki anatomy
-      // Pass 2: Pro/edit z wynikiem Pass 1 jako wsadem -> wymusza pełną Blocki anatomy
+      // SCENKA: single-pass Pro/edit z 5 referencjami
+      // Pass 2 nie zadziałał (modele edit nie chcą przerysowywać już-narysowanych figurek)
+      // Strategia: brief Claude'a teraz wymusza 3 figurki, statyczne pozy, bez słowa "minifigure"
+      // + STYLE_INSTRUCTION jako wprowadzenie
 
-      const PASS_1_INSTRUCTION = "CRITICAL STYLE REFERENCE PROTOCOL: 5 reference images are attached showing the EXACT physical anatomy required for ALL figures in the output. These references are NOT characters to insert — they are an anatomy reference template. Study these specific body features from the references and apply them to ALL new figures you generate:\n\n1. LEGS — Look at how the legs in the references are shaped: they are smooth rounded plastic forms with subtle organic curvature, NOT straight rectangular blocks. The legs taper slightly. Reproduce this leg shape in every figure.\n\n2. FEET — This is critical. Look carefully at the feet in the reference images: they are clearly shoe-shaped with a visible protruding TOE at the front, like a real shoe. They are NOT flat square block ends like standard LEGO minifigures. Every figure in the output MUST have these rounded shoe-shaped feet with a protruding toe. NO square block feet anywhere.\n\n3. HIPS — Notice the distinct rounded hip segment between the torso and legs in the references. It looks like a separate pelvis piece. Include this in every figure.\n\n4. ARMS — Smooth flowing curves, no elbow segment.\n\n5. TORSO — Rectangular shape but with softly rounded corners, not sharp trapezoidal LEGO torsos.\n\nIGNORE the black backgrounds. IGNORE the specific clothing, hair colors, and accessories of the reference figures. The figures in your output should be NEW characters wearing clothing appropriate to the scene below — but their bodies, especially their LEGS and FEET, must match the Blocki anatomy shown in the references. Even small or background figures must follow this. Do NOT use standard LEGO city minifigure body parts anywhere — particularly NOT the square block feet which are the most common LEGO feature to avoid.\n\nNOW, the scene description: ";
+      const STYLE_INSTRUCTION = "ANATOMY REFERENCE PROTOCOL: The 5 reference images attached show the required body anatomy for figures in this scene. CRITICAL — figures must have:\n\n1. ROUNDED SHOE-SHAPED FEET with a clearly protruding toe at the front (like a real shoe), NOT square block feet.\n2. SMOOTH ROUNDED LEGS that taper slightly toward the feet, NOT straight rectangular block legs.\n3. DISTINCT ROUNDED HIP segment between torso and legs.\n4. SMOOTH CURVED ARMS without elbow joints.\n5. RECTANGULAR TORSO with softly rounded corners.\n\nThese 5 features come from the reference images. IGNORE the black backgrounds and specific clothing in the references — only copy the body anatomy. The figures in the output should be new characters appropriate to the scene, but with this exact body anatomy. The figures should be LARGE and PROMINENT in the foreground — they are the focus of the composition, not background details.\n\nDo NOT use standard LEGO City minifigure anatomy — particularly avoid square block feet and rectangular block legs which are LEGO defaults.\n\nNOW, the scene to generate: ";
 
-      const pass1Body = {
-        prompt: PASS_1_INSTRUCTION + brief.image_prompt_en,
+      const requestBody = {
+        prompt: STYLE_INSTRUCTION + brief.image_prompt_en,
         image_urls: REFERENCE_FIGURE_URLS,
         num_images: 1,
         aspect_ratio: 'auto',
@@ -602,37 +618,14 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
         resolution: '1K'
       };
 
-      console.log(`[${sessionId}] image-${brief.id}: Pass 1/2 (kompozycja z referencjami)...`);
-      const pass1Url = await submitFalRequest(
-        FAL_EDIT_ENDPOINT,
-        'https://queue.fal.run/fal-ai/nano-banana-pro',
-        pass1Body,
-        FAL_KEY,
-        sessionId,
-        'pass1'
-      );
-
-      // Pass 2: refinement - wynik Pass 1 jako 6. obrazek + 5 referencji
-      // Model dostaje wygenerowany obrazek + referencje stylu, ma tylko poprawić figurki
-      const PASS_2_INSTRUCTION = "REFINEMENT TASK: The first image is a scene that has been generated. The remaining 5 images are anatomy reference templates showing the required Blocki figure style. Your task: keep EVERYTHING in the first image identical (background, buildings, vehicles, props, layout, colors, lighting, composition, camera angle) but REPLACE every figure's body anatomy to match the Blocki style from the reference images. Specifically: (1) replace square block feet with rounded shoe-shaped feet with a protruding toe at the front, (2) replace rectangular block legs with smooth rounded legs that taper slightly, (3) ensure each figure has a distinct rounded hip segment between torso and legs, (4) make arms smooth flowing curves without elbow segments, (5) keep heads, faces, clothing, hairstyles, and skin tones EXACTLY as they are in the first image — only modify body anatomy below the head. Do NOT change the scene composition, do NOT add or remove figures, do NOT change clothing colors. ONLY refine body anatomy of existing figures to match Blocki references. Output a refined version of the first image with corrected figure anatomy.";
-
-      const pass2Body = {
-        prompt: PASS_2_INSTRUCTION,
-        image_urls: [pass1Url, ...REFERENCE_FIGURE_URLS],
-        num_images: 1,
-        aspect_ratio: 'auto',
-        output_format: IMAGE_OUTPUT_FORMAT,
-        resolution: '1K'
-      };
-
-      console.log(`[${sessionId}] image-${brief.id}: Pass 2/2 (refinement anatomii)...`);
+      console.log(`[${sessionId}] image-${brief.id}: Pro/edit (single pass z 5 referencjami)...`);
       finalImageUrl = await submitFalRequest(
         FAL_EDIT_ENDPOINT,
         'https://queue.fal.run/fal-ai/nano-banana-pro',
-        pass2Body,
+        requestBody,
         FAL_KEY,
         sessionId,
-        'pass2'
+        'scenka'
       );
     }
 
@@ -643,7 +636,7 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
     const filepath = path.join(IMAGES_DIR, imageFilename);
     await fs.writeFile(filepath, buf);
 
-    logTiming(sessionId, `image-${brief.id}`, startMs, isTotem ? '(text-to-image)' : '(2-pass Pro)');
+    logTiming(sessionId, `image-${brief.id}`, startMs, isTotem ? '(text-to-image)' : '(Pro single-pass)');
     return `/images/${imageFilename}`;
   } catch (err) {
     if (retryCount < 2) {

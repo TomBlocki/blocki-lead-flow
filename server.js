@@ -548,14 +548,45 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
       // Edit może być wolniejszy niż text-to-image, dłuższy timeout (2 min)
       await new Promise(r => setTimeout(r, 500));
       const s = await fetch(statusUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
-      const sj = await s.json();
+      if (!s.ok) {
+        const errText = await s.text();
+        console.log(`[${sessionId}] fal status check failed (${s.status}). URL: ${statusUrl}. Response: ${errText.slice(0, 500)}`);
+        throw new Error(`fal status ${s.status}: ${errText.slice(0, 200)}`);
+      }
+      const statusText = await s.text();
+      let sj;
+      try {
+        sj = JSON.parse(statusText);
+      } catch (e) {
+        console.log(`[${sessionId}] fal status returned non-JSON. Response: ${statusText.slice(0, 500)}`);
+        throw new Error(`fal status non-JSON: ${statusText.slice(0, 200)}`);
+      }
+
       if (sj.status === 'COMPLETED') {
         const r = await fetch(resultUrl, { headers: { 'Authorization': `Key ${FAL_KEY}` } });
-        const rj = await r.json();
+        if (!r.ok) {
+          const errText = await r.text();
+          console.log(`[${sessionId}] fal result fetch failed (${r.status}). URL: ${resultUrl}. Response: ${errText.slice(0, 500)}`);
+          throw new Error(`fal result ${r.status}: ${errText.slice(0, 200)}`);
+        }
+        const resultText = await r.text();
+        let rj;
+        try {
+          rj = JSON.parse(resultText);
+        } catch (e) {
+          console.log(`[${sessionId}] fal result returned non-JSON. Response: ${resultText.slice(0, 500)}`);
+          throw new Error(`fal result non-JSON: ${resultText.slice(0, 200)}`);
+        }
         const url = rj.images?.[0]?.url;
-        if (!url) throw new Error('brak URL');
+        if (!url) {
+          console.log(`[${sessionId}] fal result has no image URL. Full response: ${JSON.stringify(rj).slice(0, 800)}`);
+          throw new Error('brak URL');
+        }
 
         const imgRes = await fetch(url);
+        if (!imgRes.ok) {
+          throw new Error(`fal image download ${imgRes.status}`);
+        }
         const buf = Buffer.from(await imgRes.arrayBuffer());
         const filepath = path.join(IMAGES_DIR, imageFilename);
         await fs.writeFile(filepath, buf);
@@ -563,7 +594,10 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
         logTiming(sessionId, `image-${brief.id}`, startMs, isTotem ? '(text-to-image)' : '(edit z 5 ref)');
         return `/images/${imageFilename}`;
       }
-      if (sj.status === 'FAILED') throw new Error(`fal failed: ${JSON.stringify(sj)}`);
+      if (sj.status === 'FAILED') {
+        console.log(`[${sessionId}] fal job FAILED. Full status: ${JSON.stringify(sj).slice(0, 800)}`);
+        throw new Error(`fal failed: ${JSON.stringify(sj).slice(0, 300)}`);
+      }
     }
     throw new Error('fal timeout');
   } catch (err) {

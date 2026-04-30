@@ -380,6 +380,8 @@ JSON w \`\`\`json:
   "anchor": "${config.anchorLabel}",
   "title_pl": "tytuł max 5 słów",
   "concept_pl": "2-3 zdania po polsku",
+  "rationale_pl": "1-2 zdania: na czym oparty jest ten pomysł. Konkretnie: jaki fakt z researchu lub jaki element marki klienta zainspirował tę kompozycję. Format: 'Wykorzystałem [konkret z researchu/marki], dlatego...'",
+  "depicts_pl": "1-2 zdania: co dosłownie przedstawia obrazek. Konkretnie: kto/co jest w kadrze, co się dzieje, jakie rekwizyty są widoczne.",
   "key_elements": ["element1", "element2"],
   "image_prompt_en": "Natural English description 400-800 chars. Start: 'A detailed scale model built entirely from interlocking plastic construction bricks like LEGO...'. End with the EXACT mandatory Blocki anatomy sentence above."
 }
@@ -1223,6 +1225,10 @@ button.secondary:hover { background: #444; }
 .bulk-download-bar span { font-size: 13px; color: #666; }
 .prompt-toggle { font-size: 11px; color: #888; cursor: pointer; margin-top: 4px; user-select: none; }
 .prompt-toggle:hover { color: #0066CC; }
+.concept-box { background: #f8f9fa; border-left: 3px solid #0066CC; padding: 10px 12px; margin: 10px 0; border-radius: 4px; font-size: 13px; line-height: 1.5; }
+.concept-row { margin: 4px 0; color: #333; }
+.concept-row + .concept-row { margin-top: 8px; }
+.concept-label { font-weight: 600; color: #0066CC; }
 .prompt-box { display: none; background: #f8f8f8; border: 1px solid #e0e0e0; border-radius: 4px; padding: 8px; margin-top: 6px; font-family: Menlo, monospace; font-size: 11px; color: #444; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
 .prompt-box.visible { display: block; }
 .version-nav { display: none; gap: 6px; align-items: center; margin-top: 6px; font-size: 11px; }
@@ -1626,6 +1632,16 @@ function renderCardSkeleton(brief) {
   card.className = 'card';
   card.id = 'card-' + brief.id;
   const promptText = brief.image_prompt_en || '(prompt niedostępny)';
+  const rationaleText = brief.rationale_pl || '';
+  const depictsText = brief.depicts_pl || '';
+  let conceptBlock = '';
+  if (rationaleText || depictsText) {
+    conceptBlock =
+      '<div class="concept-box">' +
+        (rationaleText ? '<div class="concept-row"><span class="concept-label">💡 Skąd pomysł:</span> ' + escapeHtml(rationaleText) + '</div>' : '') +
+        (depictsText ? '<div class="concept-row"><span class="concept-label">🎬 Co przedstawia:</span> ' + escapeHtml(depictsText) + '</div>' : '') +
+      '</div>';
+  }
   card.innerHTML =
     '<h3>' + (brief.title_pl || brief.id) + '</h3>' +
     '<div class="card-status working" id="cs-' + brief.id + '">' + brief.format + ' × ' + brief.anchor + ' — generowanie...</div>' +
@@ -1636,6 +1652,7 @@ function renderCardSkeleton(brief) {
       '<button onclick="navigateVersion(\\''+ brief.id +'\\', 1)" id="vn-next-' + brief.id + '">→</button>' +
       '<span class="version-comment" id="vc-' + brief.id + '"></span>' +
     '</div>' +
+    conceptBlock +
     '<div class="prompt-toggle" onclick="togglePrompt(\\''+ brief.id +'\\')">📝 Zobacz prompt</div>' +
     '<div class="prompt-box" id="pb-' + brief.id + '">' + escapeHtml(promptText) + '</div>' +
     '<label>Co poprawić</label>' +

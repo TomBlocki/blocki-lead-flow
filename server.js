@@ -20,7 +20,7 @@ const MODEL_REGEN = 'claude-sonnet-4-5-20250929';
 
 // NANO BANANA 2 - reasoning-guided, fast (1-3s), Gemini 3.1 Flash Image
 const FAL_ENDPOINT = 'https://queue.fal.run/fal-ai/nano-banana-2';
-const FAL_EDIT_ENDPOINT = 'https://queue.fal.run/fal-ai/nano-banana-2/edit';
+const FAL_EDIT_ENDPOINT = 'https://queue.fal.run/fal-ai/nano-banana-pro/edit';
 const IMAGE_ASPECT_RATIO = '1:1';
 const IMAGE_OUTPUT_FORMAT = 'png';
 
@@ -548,10 +548,11 @@ async function generateImage(brief, imageFilename, sessionId, retryCount = 0) {
     }
 
     // KRYTYCZNE: status i wynik leci na bazowy queue URL bez sufiksu /edit
-    // Submit: queue.fal.run/fal-ai/nano-banana-2/edit (POST)
-    // Status: queue.fal.run/fal-ai/nano-banana-2/requests/{id}/status (GET, BEZ /edit)
-    // Result: queue.fal.run/fal-ai/nano-banana-2/requests/{id} (GET, BEZ /edit)
-    const queueBaseUrl = 'https://queue.fal.run/fal-ai/nano-banana-2';
+    // Dla totemu (nano-banana-2): queue.fal.run/fal-ai/nano-banana-2/requests/{id}
+    // Dla scenki (nano-banana-pro/edit): queue.fal.run/fal-ai/nano-banana-pro/requests/{id}
+    const queueBaseUrl = isTotem
+      ? 'https://queue.fal.run/fal-ai/nano-banana-2'
+      : 'https://queue.fal.run/fal-ai/nano-banana-pro';
     const statusUrl = `${queueBaseUrl}/requests/${request_id}/status`;
     const resultUrl = `${queueBaseUrl}/requests/${request_id}`;
 
